@@ -1,6 +1,8 @@
 package me.vickychijwani.spectre.testing
 
+import android.support.test.InstrumentationRegistry.getInstrumentation
 import android.support.test.espresso.Espresso.onView
+import android.support.test.espresso.Espresso.openActionBarOverflowOrOptionsMenu
 import android.support.test.espresso.action.ViewActions.click
 import android.support.test.espresso.action.ViewActions.closeSoftKeyboard
 import android.support.test.espresso.action.ViewActions.replaceText
@@ -10,12 +12,9 @@ import android.support.test.espresso.matcher.ViewMatchers.isDisplayed
 import android.support.test.espresso.matcher.ViewMatchers.withId
 import android.support.test.espresso.matcher.ViewMatchers.withText
 import me.vickychijwani.spectre.R
-import me.vickychijwani.spectre.view.PostListActivity
+import me.vickychijwani.spectre.view.*
 import org.hamcrest.CoreMatchers.containsString
 
-
-val TEST_BLOG = "10.0.2.2:2368"
-val TEST_BLOG_WITH_PROTOCOL = "http://$TEST_BLOG"
 
 fun startLogin(func: BlogAddressRobot.() -> Unit) = BlogAddressRobot().apply { func() }
 
@@ -29,6 +28,10 @@ class BlogAddressRobot {
         onView(withId(R.id.next_btn))
                 .perform(click())
         return ConnectResultRobot().apply { func() }
+    }
+
+    fun isLoggedOut() {
+        intended(hasActivity(LoginActivity::class))
     }
 }
 
@@ -53,12 +56,19 @@ class ConnectResultRobot : ErrorRobot {
     fun login(func: LoginResultRobot.() -> Unit): LoginResultRobot {
         onView(withId(R.id.sign_in_btn))
                 .perform(click())
-        return LoginResultRobot().apply{ func() }
+        return LoginResultRobot().apply { func() }
     }
 }
 
 class LoginResultRobot : ErrorRobot {
     fun isLoggedIn() {
         intended(hasActivity(PostListActivity::class))
+    }
+
+    fun logout(func: BlogAddressRobot.() -> Unit) : BlogAddressRobot {
+        openActionBarOverflowOrOptionsMenu(getInstrumentation().targetContext)
+        onView(withText("Logout"))
+                .perform(click())
+        return BlogAddressRobot().apply { func() }
     }
 }

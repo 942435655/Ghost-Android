@@ -26,10 +26,10 @@ The official Ghost Android application. Get it [here on the Google Play Store][p
 If you'd like to see support for your language in Ghost Android, you can easily [contribute translations on Weblate][weblate]. _This requires no setup and no knowledge of Android development_, just keep in mind a few simple rules:
 
 - Many strings have [placeholders](http://envyandroid.com/android-string-xml-resource-formatting/) like "%s", "%d", "%2$s", etc. - keep these intact because other numbers and strings are inserted into these placeholders
-- Single and double quotes need to be preceded with a backslash character (\' and \" respectively)
+- Single and double quotes need to be preceded with a backslash character (`\'` and `\"` respectively)
 - For short strings, try to keep the translated string length close to the English one, because longer strings may not fit in the UI
 
-If you need help getting started, [email me](mailto:vickychijwani@gmail.com) or drop a comment on the [master translation issue](https://github.com/vickychijwani/quill/issues/26).
+If you need help getting started, drop a comment on [this issue](https://github.com/TryGhost/Ghost-Android/issues/14).
 
 ### Developer setup
 
@@ -44,13 +44,26 @@ If you face any issues setting this up, please let me know by [filing a new issu
 - [@Dennis-Mayk](https://github.com/Dennis-Mayk) (German translation)
 - [@naofum](https://github.com/naofum) (Japanese translation)
 - [@svenkapudija](https://github.com/svenkapudija) (Croatian translation)
-- [@yffengdong](https://hosted.weblate.org/user/yffengdong/) (Chinese zh-CN translation)
+- [@yffengdong](https://hosted.weblate.org/user/yffengdong/) (Simplified Chinese (zh-CN) translation)
 - [@guillaumevidal](https://github.com/guillaumevidal) (French translation)
 - [@fastbyte01](https://hosted.weblate.org/user/fastbyte01/) (Italian translation)
 - [@cristears](https://hosted.weblate.org/user/cristears/) (Korean translation)
 - [Allan Nordhøy](https://hosted.weblate.org/user/kingu/) (Norwegian translation)
-
+- [@urbangeek](https://github.com/urbangeek) (Bengali translation)
+- [@MertcanGokgoz](https://github.com/mertcangokgoz) (Turkish translation)
+- [@geekdinazor](https://github.com/geekdinazor) (Turkish translation)
+- [Thiago Tomasi](https://hosted.weblate.org/user/thiagotomasi/) (Portuguese (Brazil) translation)
+- [@frottle](https://hosted.weblate.org/user/frottle/) (Indonesian translation)
+- [Aditya](https://hosted.weblate.org/user/siadit/) (Indonesian translation)
+- [Heimen Stoffels](https://hosted.weblate.org/user/vistaus/) (Dutch translation)
+- [Akos Nagy](https://hosted.weblate.org/user/conwid/) (Hungarian translation)
+- [Weizhi Xie](https://github.com/xieweizhi) (Traditional Chinese (zh-HK) translation)
+- [@monolifed](https://hosted.weblate.org/user/monolifed/) (Turkish translation)
 
 [playstore]: https://play.google.com/store/apps/details?id=org.ghost.android
 [weblate]: https://hosted.weblate.org/engage/ghost/en/
 [conflict-ui]: https://github.com/vickychijwani/quill/issues/144#issuecomment-264991612
+
+# Copyright & License
+
+Copyright (c) 2015-2020 Vicky Chijwani & Ghost Foundation - Released under the [MIT license](LICENSE). Ghost and the Ghost Logo are trademarks of Ghost Foundation Ltd. Please see our [trademark policy](https://ghost.org/trademark/) for info on acceptable usage.

@@ -8,16 +8,7 @@ import me.vickychijwani.spectre.network.entity.*
 import me.vickychijwani.spectre.testing.*
 import me.vickychijwani.spectre.util.NetworkUtils
 import okhttp3.logging.HttpLoggingInterceptor
-import org.hamcrest.Matchers.`is`
-import org.hamcrest.Matchers.allOf
-import org.hamcrest.Matchers.empty
-import org.hamcrest.Matchers.hasItem
-import org.hamcrest.Matchers.hasProperty
-import org.hamcrest.Matchers.hasSize
-import org.hamcrest.Matchers.instanceOf
-import org.hamcrest.Matchers.isEmptyOrNullString
-import org.hamcrest.Matchers.not
-import org.hamcrest.Matchers.notNullValue
+import org.hamcrest.Matchers.*
 import org.junit.*
 import org.junit.Assert.assertThat
 import org.junit.Assert.fail
@@ -26,6 +17,7 @@ import java.net.HttpURLConnection.HTTP_CREATED
 import java.net.HttpURLConnection.HTTP_NOT_FOUND
 import java.net.HttpURLConnection.HTTP_OK
 import java.util.*
+import org.hamcrest.Matchers.`is` as Is
 
 /**
  * TYPE: integration-style (requires running Ghost server)
@@ -64,16 +56,16 @@ class GhostApiTest {
         // Ghost uses a 12-character client secret, evident from the Ghost source code (1 byte can hold 2 hex chars):
         // { secret: crypto.randomBytes(6).toString('hex') }
         // file: core/server/data/migration/fixtures/004/04-update-ghost-admin-client.js
-        assertThat(clientSecret.length, `is`(12))
+        assertThat(clientSecret.length, Is(12))
     }
 
     @Test
     fun test_getAuthToken_withPassword() {
         API.doWithAuthToken { token ->
-            assertThat(token.tokenType, `is`("Bearer"))
+            assertThat(token.tokenType, Is("Bearer"))
             assertThat(token.accessToken, notNullValue())
             assertThat(token.refreshToken, notNullValue())
-            assertThat(token.expiresIn, `is`(2628000))
+            assertThat(token.expiresIn, Is(2628000))
         }
     }
 
@@ -88,8 +80,8 @@ class GhostApiTest {
         } catch (e: HttpException) {
             val apiErrors = GhostApiUtils.parseApiErrors(RETROFIT, e)
             assertThat(apiErrors, notNullValue())
-            assertThat(apiErrors!!.errors.size, `is`(1))
-            assertThat(apiErrors.errors[0].errorType, `is`("NotFoundError"))
+            assertThat(apiErrors!!.errors.size, Is(1))
+            assertThat(apiErrors.errors[0].errorType, Is("NotFoundError"))
             assertThat(apiErrors.errors[0].message, notNullValue())
             assertThat(apiErrors.errors[0].message, not(""))
         } catch (e: Exception) {
@@ -108,11 +100,11 @@ class GhostApiTest {
             fail("Test did not throw exception as expected!")
         } catch (e: HttpException) {
             // Ghost returns a 422 Unprocessable Entity for an incorrect password
-            assertThat("http code = ${e.code()}", NetworkUtils.isUnprocessableEntity(e), `is`(true))
+            assertThat("http code = ${e.code()}", NetworkUtils.isUnprocessableEntity(e), Is(true))
             val apiErrors = GhostApiUtils.parseApiErrors(RETROFIT, e)
             assertThat(apiErrors, notNullValue())
-            assertThat(apiErrors!!.errors.size, `is`(1))
-            assertThat(apiErrors.errors[0].errorType, `is`("ValidationError"))
+            assertThat(apiErrors!!.errors.size, Is(1))
+            assertThat(apiErrors.errors[0].errorType, Is("ValidationError"))
             assertThat(apiErrors.errors[0].message, notNullValue())
             assertThat(apiErrors.errors[0].message, not(""))
         } catch (e: Exception) {
@@ -128,10 +120,10 @@ class GhostApiTest {
             val credentials = RefreshReqBody(expiredToken.refreshToken, clientSecret)
             val refreshedToken = execute(API.refreshAuthToken(credentials))
 
-            assertThat(refreshedToken.tokenType, `is`("Bearer"))
+            assertThat(refreshedToken.tokenType, Is("Bearer"))
             assertThat(refreshedToken.accessToken, notNullValue())
             assertThat(refreshedToken.refreshToken, isEmptyOrNullString())
-            assertThat(refreshedToken.expiresIn, `is`(2628000))
+            assertThat(refreshedToken.expiresIn, Is(2628000))
 
             // revoke only the access token, the refresh token is null anyway
             val reqBody = RevokeReqBody.fromAccessToken(refreshedToken.accessToken, clientSecret)
@@ -154,8 +146,8 @@ class GhostApiTest {
             val response = execute(API.revokeAuthToken(token.authHeader, reqBody))
             val jsonObj = response.asJsonObject
 
-            assertThat(jsonObj.has("error"), `is`(false))
-            assertThat(jsonObj.get("token").asString, `is`(reqBody.token))
+            assertThat(jsonObj.has("error"), Is(false))
+            assertThat(jsonObj.get("token").asString, Is(reqBody.token))
         }
     }
 
@@ -165,13 +157,13 @@ class GhostApiTest {
             val response = execute(API.getCurrentUser(token.authHeader, ""))
             val user = response.body()!!.users[0]
 
-            assertThat(response.code(), `is`(HTTP_OK))
+            assertThat(response.code(), Is(HTTP_OK))
             assertThat(response.headers().get("ETag"), not(isEmptyOrNullString()))
             assertThat(user, notNullValue())
             assertThat(user.id, notNullValue())
             assertThat(user.name, notNullValue())
             assertThat(user.slug, notNullValue())
-            assertThat(user.email, `is`(TEST_USER))
+            assertThat(user.email, Is(TEST_USER))
             //assertThat(user.getImage(), anyOf(nullValue(), notNullValue())); // no-op
             //assertThat(user.getBio(), anyOf(nullValue(), notNullValue())); // no-op
             assertThat(user.roles, not(empty()))
@@ -186,40 +178,39 @@ class GhostApiTest {
     @Test
     fun test_createPost() {
         API.doWithAuthToken { token ->
-            API.createRandomPost(token, { expectedPost, response, createdPost ->
-                assertThat(response.code(), `is`(HTTP_CREATED))
-                assertThat(createdPost.title, `is`(expectedPost.title))
-                assertThat(createdPost.slug, `is`(Slugify().slugify(expectedPost.title)))
-                assertThat(createdPost.status, `is`(expectedPost.status))
-                assertThat(createdPost.markdown, `is`(expectedPost.markdown))
-                assertThat(createdPost.html, `is`("<div class=\"kg-card-markdown\">" +
-                        "<p>${expectedPost.markdown}</p>\n</div>"))
-                assertThat(createdPost.tags, `is`(expectedPost.tags))
-                assertThat(createdPost.customExcerpt, `is`(expectedPost.customExcerpt))
-                assertThat(createdPost.isFeatured, `is`(expectedPost.isFeatured))
-                assertThat(createdPost.isPage, `is`(expectedPost.isPage))
-            })
+            API.createRandomPost(token) { expectedPost, response, createdPost ->
+                assertThat(response.code(), Is(HTTP_CREATED))
+                assertThat(createdPost.title, Is(expectedPost.title))
+                assertThat(createdPost.slug, Is(Slugify().slugify(expectedPost.title)))
+                assertThat(createdPost.status, Is(expectedPost.status))
+                assertThat(createdPost.mobiledoc, Is(expectedPost.mobiledoc))
+                assertThat(createdPost.html, containsString("<p>${expectedPost.markdown}</p>\n"))
+                assertThat(createdPost.tags, Is(expectedPost.tags))
+                assertThat(createdPost.customExcerpt, Is(expectedPost.customExcerpt))
+                assertThat(createdPost.isFeatured, Is(expectedPost.isFeatured))
+                assertThat(createdPost.isPage, Is(expectedPost.isPage))
+            }
         }
     }
 
     @Test
     fun test_getPosts() {
         API.doWithAuthToken { token ->
-            API.createRandomPost(token, { post1, _, _ ->
-                API.createRandomPost(token, { post2, _, _ ->
-                    val response = execute(API.getPosts(token.authHeader, "", 100))
+            API.createRandomPost(token) { post1, _, _ ->
+                API.createRandomPost(token) { post2, _, _ ->
+                    val response = execute(API.getPosts(token.authHeader, "", null, 100))
                     val posts = response.body()!!.posts
-                    assertThat(response.code(), `is`(HTTP_OK))
-                    assertThat(posts.size, `is`(2))
+                    assertThat(response.code(), Is(HTTP_OK))
+                    assertThat(posts.size, Is(2))
                     // posts are returned in reverse-chrono order
                     // check latest post
-                    assertThat(posts[0].title, `is`(post2.title))
-                    assertThat(posts[0].markdown, `is`(post2.markdown))
+                    assertThat(posts[0].title, Is(post2.title))
+                    assertThat(posts[0].mobiledoc, Is(post2.mobiledoc))
                     // check second-last post
-                    assertThat(posts[1].title, `is`(post1.title))
-                    assertThat(posts[1].markdown, `is`(post1.markdown))
-                })
-            })
+                    assertThat(posts[1].title, Is(post1.title))
+                    assertThat(posts[1].mobiledoc, Is(post1.mobiledoc))
+                }
+            }
         }
     }
 
@@ -227,40 +218,40 @@ class GhostApiTest {
     fun test_getPosts_limit() {
         // setting the limit to N should return the *latest* N posts
         API.doWithAuthToken { token ->
-            API.createRandomPost(token, { _, _, _ ->
-                API.createRandomPost(token, { post2, _, _ ->
-                    val response = execute(API.getPosts(token.authHeader, "", 1))
+            API.createRandomPost(token) { _, _, _ ->
+                API.createRandomPost(token) { post2, _, _ ->
+                    val response = execute(API.getPosts(token.authHeader, "", null, 1))
                     val posts = response.body()!!.posts
-                    assertThat(response.code(), `is`(HTTP_OK))
-                    assertThat(posts.size, `is`(1))
-                    assertThat(posts[0].title, `is`(post2.title))
-                    assertThat(posts[0].markdown, `is`(post2.markdown))
-                })
-            })
+                    assertThat(response.code(), Is(HTTP_OK))
+                    assertThat(posts.size, Is(1))
+                    assertThat(posts[0].title, Is(post2.title))
+                    assertThat(posts[0].mobiledoc, Is(post2.mobiledoc))
+                }
+            }
         }
     }
 
     @Test
     fun test_getPost() {
         API.doWithAuthToken { token ->
-            API.createRandomPost(token, { expected, _, created ->
+            API.createRandomPost(token) { expected, _, created ->
                 val response = execute(API.getPost(token.authHeader, created.id))
                 val post = response.body()!!.posts[0]
-                assertThat(response.code(), `is`(HTTP_OK))
-                assertThat(post.title, `is`(expected.title))
-                assertThat(post.markdown, `is`(expected.markdown))
-            })
+                assertThat(response.code(), Is(HTTP_OK))
+                assertThat(post.title, Is(expected.title))
+                assertThat(post.mobiledoc, Is(expected.mobiledoc))
+            }
         }
     }
 
     @Test
     fun test_updatePost() {
         API.doWithAuthToken { token ->
-            API.createRandomPost(token, { newPost, _, created ->
+            API.createRandomPost(token) { newPost, _, created ->
                 val updatedTag = Tag("updated-tag")
                 val expectedPost = Post(newPost).also {
-                    it.markdown = "updated **markdown**"
-                    it.mobiledoc = GhostApiUtils.markdownToMobiledoc(it.markdown)
+                    it.mobiledoc = GhostApiUtils.initializeMobiledoc()
+                    it.mobiledoc = GhostApiUtils.insertMarkdownIntoMobiledoc("updated **markdown**", it.mobiledoc)
                     it.tags = RealmList(updatedTag)
                     it.customExcerpt = "updated excerpt"
                     it.isFeatured = true
@@ -273,15 +264,15 @@ class GhostApiTest {
                 val actualPost = execute(API.getPost(token.authHeader, actualPostId))
                         .body()!!.posts[0]
 
-                assertThat(response.code(), `is`(HTTP_OK))
-                assertThat(actualPost.title, `is`(expectedPost.title))
-                assertThat(actualPost.markdown, `is`(expectedPost.markdown))
+                assertThat(response.code(), Is(HTTP_OK))
+                assertThat(actualPost.title, Is(expectedPost.title))
+                assertThat(actualPost.mobiledoc, Is(expectedPost.mobiledoc))
                 assertThat(actualPost.tags, hasSize(1))
-                assertThat(actualPost.tags[0].name, `is`(updatedTag.name))
-                assertThat(actualPost.customExcerpt, `is`(expectedPost.customExcerpt))
-                assertThat(actualPost.isFeatured, `is`(expectedPost.isFeatured))
-                assertThat(actualPost.isPage, `is`(expectedPost.isPage))
-            })
+                assertThat(actualPost.tags[0].name, Is(updatedTag.name))
+                assertThat(actualPost.customExcerpt, Is(expectedPost.customExcerpt))
+                assertThat(actualPost.isFeatured, Is(expectedPost.isFeatured))
+                assertThat(actualPost.isPage, Is(expectedPost.isPage))
+            }
         }
     }
 
@@ -291,7 +282,7 @@ class GhostApiTest {
             val CUSTOM_EXCERPT_LIMIT = 300
 
             // excerpt length == allowed limit => should succeed
-            API.createRandomPost(token, { newPost, _, created ->
+            API.createRandomPost(token) { newPost, _, created ->
                 val expectedPost = Post(newPost)
                 expectedPost.customExcerpt = getRandomString(CUSTOM_EXCERPT_LIMIT)
                 val postStubs = PostStubList.from(expectedPost)
@@ -301,20 +292,20 @@ class GhostApiTest {
                 val actualPost = execute(API.getPost(token.authHeader, actualPostId))
                         .body()!!.posts[0]
 
-                assertThat(response.code(), `is`(HTTP_OK))
-                assertThat(actualPost.customExcerpt.length, `is`(expectedPost.customExcerpt.length))
-            })
+                assertThat(response.code(), Is(HTTP_OK))
+                assertThat(actualPost.customExcerpt.length, Is(expectedPost.customExcerpt.length))
+            }
 
             // excerpt length == (allowed limit + 1) => should fail
-            API.createRandomPost(token, { newPost, _, created ->
+            API.createRandomPost(token) { newPost, _, created ->
                 val expectedPost = Post(newPost)
                 expectedPost.customExcerpt = getRandomString(CUSTOM_EXCERPT_LIMIT + 1)
                 val postStubs = PostStubList.from(expectedPost)
 
                 val response = execute(API.updatePost(token.authHeader, created.id, postStubs))
 
-                assertThat(response.code(), `is`(422))   // 422 Unprocessable Entity
-            })
+                assertThat(response.code(), Is(422))   // 422 Unprocessable Entity
+            }
         }
     }
 
@@ -322,10 +313,10 @@ class GhostApiTest {
     fun test_deletePost() {
         API.doWithAuthToken { token ->
             var deleted: Post? = null
-            API.createRandomPost(token, { _, _, created -> deleted = created })
+            API.createRandomPost(token) { _, _, created -> deleted = created }
             // post should be deleted by this point
             val response = execute(API.getPost(token.authHeader, deleted!!.id))
-            assertThat(response.code(), `is`(HTTP_NOT_FOUND))
+            assertThat(response.code(), Is(HTTP_NOT_FOUND))
         }
     }
 
@@ -335,17 +326,18 @@ class GhostApiTest {
             val response = execute(API.getSettings(token.authHeader, ""))
             val settings = response.body()!!.settings
 
-            assertThat(response.code(), `is`(HTTP_OK))
+            assertThat(response.code(), Is(HTTP_OK))
             assertThat(response.headers().get("ETag"), not(isEmptyOrNullString()))
             assertThat(settings, notNullValue())
             // blog title
             assertThat(settings, hasItem(allOf(
-                    hasProperty("key", `is`("title")),
+                    hasProperty("key", Is("title")),
                     hasProperty("value", not(isEmptyOrNullString())))))
             // permalink format
-            assertThat(settings, hasItem(allOf(
-                    hasProperty("key", `is`("permalinks")),
-                    hasProperty("value", `is`("/:slug/")))))
+            // UPDATE: permalink setting was removed in Ghost 2.0: https://github.com/TryGhost/Ghost/pull/9768/files
+//            assertThat(settings, hasItem(allOf(
+//                    hasProperty("key", Is("permalinks")),
+//                    hasProperty("value", Is("/:slug/")))))
         }
     }
 
@@ -367,7 +359,7 @@ class GhostApiTest {
                     .get(0).asJsonObject
                     .get("version").asString
 
-            assertThat(response.code(), `is`(HTTP_OK))
+            assertThat(response.code(), Is(HTTP_OK))
             assertThat(response.headers().get("ETag"), not(isEmptyOrNullString()))
             assertThat(about, notNullValue())
             assertThat(version, not(isEmptyOrNullString()))
@@ -385,8 +377,8 @@ private fun GhostApiService.createRandomPost(token: AuthToken, callback: (Post, 
     val markdown = getRandomString(100)
     val newPost = Post().also {
         it.title = title
-        it.markdown = markdown
-        it.mobiledoc = GhostApiUtils.markdownToMobiledoc(markdown)
+        it.mobiledoc = GhostApiUtils.initializeMobiledoc()
+        it.mobiledoc = GhostApiUtils.insertMarkdownIntoMobiledoc(markdown, it.mobiledoc)
         it.tags = RealmList()
         it.customExcerpt = markdown.substring(0, 100)
     }

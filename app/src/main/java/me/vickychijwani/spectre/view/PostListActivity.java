@@ -62,12 +62,15 @@ import me.vickychijwani.spectre.event.RefreshDataEvent;
 import me.vickychijwani.spectre.event.UserLoadedEvent;
 import me.vickychijwani.spectre.model.entity.Post;
 import me.vickychijwani.spectre.model.entity.Setting;
+import me.vickychijwani.spectre.network.GhostApiUtils;
 import me.vickychijwani.spectre.util.DeviceUtils;
-import me.vickychijwani.spectre.util.NetworkUtils;
 import me.vickychijwani.spectre.util.log.Log;
 import me.vickychijwani.spectre.view.image.BorderedCircleTransformation;
 import me.vickychijwani.spectre.view.widget.SpaceItemDecoration;
 import retrofit2.Response;
+
+import static me.vickychijwani.spectre.util.NetworkUtils.isConnectionError;
+import static me.vickychijwani.spectre.util.NetworkUtils.makePicassoUrl;
 
 public class PostListActivity extends BaseActivity {
 
@@ -141,6 +144,11 @@ public class PostListActivity extends BaseActivity {
             int pos = mPostList.getChildLayoutPosition(v);
             if (pos == RecyclerView.NO_POSITION) return;
             Post post = (Post) mPostAdapter.getItem(pos);
+            if (! GhostApiUtils.INSTANCE.hasOnlyMarkdownCard(post.getMobiledoc())) {
+                Snackbar.make(mPostList, R.string.koenig_post_error,
+                        Snackbar.LENGTH_SHORT).show();
+                return;
+            }
             if (post.isMarkedForDeletion()) {
                 Snackbar.make(mPostList, R.string.status_marked_for_deletion_open_error,
                         Snackbar.LENGTH_SHORT).show();
@@ -281,7 +289,7 @@ public class PostListActivity extends BaseActivity {
 
         Throwable error = event.apiFailure.error;
         Response response = event.apiFailure.response;
-        if (error != null && NetworkUtils.isConnectionError(error)) {
+        if (error != null && isConnectionError(error)) {
             Toast.makeText(this, R.string.network_timeout, Toast.LENGTH_LONG).show();
         } else {
             Log.e(TAG, "Generic error message triggered during refresh");
@@ -306,14 +314,14 @@ public class PostListActivity extends BaseActivity {
                 return;
             }
             String blogUrl = AccountManager.getActiveBlogUrl();
-            String imageUrl = NetworkUtils.makeAbsoluteUrl(blogUrl, event.user.getProfileImage());
+            String imageUrl = makePicassoUrl(blogUrl, event.user.getProfileImage());
             getPicasso()
                     .load(imageUrl)
                     .transform(new BorderedCircleTransformation())
                     .fit()
                     .into(mUserImageView);
         } else {
-            // Crashlytics issue #77
+            // As of Ghost v2.13.1 (possibly earlier), profile image is null if not set
             Log.w(TAG, "user image is null!");
         }
     }
@@ -341,7 +349,7 @@ public class PostListActivity extends BaseActivity {
         if (mPosts.size() >= event.postsFetchLimit) {
             CharSequence message = Html.fromHtml(getString(R.string.post_limit_exceeded,
                     getString(R.string.app_name), event.postsFetchLimit,
-                    "https://github.com/vickychijwani/quill/issues/81"));
+                    "https://github.com/TryGhost/Ghost-Android/issues/15"));
             mPostAdapter.showFooter(message);
         } else {
             mPostAdapter.hideFooter();

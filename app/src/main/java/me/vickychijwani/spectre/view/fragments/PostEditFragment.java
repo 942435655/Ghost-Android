@@ -25,6 +25,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import android.webkit.MimeTypeMap;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -60,6 +61,7 @@ import me.vickychijwani.spectre.util.AppUtils;
 import me.vickychijwani.spectre.util.EditTextSelectionState;
 import me.vickychijwani.spectre.util.EditTextUtils;
 import me.vickychijwani.spectre.util.KeyboardUtils;
+import me.vickychijwani.spectre.util.NetworkUtils;
 import me.vickychijwani.spectre.util.PostUtils;
 import me.vickychijwani.spectre.util.functions.Action1;
 import me.vickychijwani.spectre.util.log.Log;
@@ -188,8 +190,16 @@ public class PostEditFragment extends BaseFragment implements
         super.onSaveInstanceState(outState);
         outState.putParcelable(BundleKeys.POST, mPost);
         outState.putBoolean(BundleKeys.POST_EDITED, mPostChangedInMemory);
-        // save the editor cursor pos because setPost is called in onCreate/onResume
-        outState.putInt(EDITOR_CURSOR_POS, mPostEditView.getSelectionEnd());
+        // Save the editor cursor pos. From onSaveInstanceState docs:
+        // "There are no guarantees about whether it will occur before or after onPause()"
+        // That's why we need to apply this defensive logic to save the position in all cases
+        int editorCursorPos = mPostEditView.getSelectionEnd();
+        if (editorCursorPos == 0 && mPostEditViewCursorPos > 0) {
+            // if the current position is 0, use the last-known position, because the current pos
+            // may have already been reset to 0 by the call to savePost in onPause()
+            editorCursorPos = mPostEditViewCursorPos;
+        }
+        outState.putInt(EDITOR_CURSOR_POS, editorCursorPos);
     }
 
     public void saveSelectionState() {
@@ -211,6 +221,8 @@ public class PostEditFragment extends BaseFragment implements
         super.onPause();
         // remove pending callbacks
         mHandler.removeCallbacks(mSaveTimeoutRunnable);
+        // note misc editor state before saving post, because setPost is called in onResume
+        mPostEditViewCursorPos = mPostEditView.getSelectionEnd();
         // persist changes to disk, unless the user opted to discard those changes
         // workaround: do this ONLY if an image upload is NOT in progress - this is to avoid saving
         // the post prematurely and generating a spurious conflict that cannot be dealt with cleanly
@@ -222,8 +234,6 @@ public class PostEditFragment extends BaseFragment implements
             // we still need to save to memory, else the post will revert to its original state!
             saveToMemory();
         }
-        // save misc editor state because setPost is called in onResume
-        mPostEditViewCursorPos = mPostEditView.getSelectionEnd();
 
         // unsubscribe from observable and hide progress bar
         if (mUploadDisposable != null && !mUploadDisposable.isDisposed()) {
@@ -402,6 +412,10 @@ public class PostEditFragment extends BaseFragment implements
     @SuppressLint("InlinedApi") // suppressed because PermissionsDispatcher handles API levels for us
     @NeedsPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
     public void onInsertImageUploadClicked(Action1<String> uploadDoneAction) {
+        if (! NetworkUtils.isConnected(getActivity())) {
+            Toast.makeText(getActivity(), R.string.no_internet_connection, Toast.LENGTH_SHORT).show();
+            return;
+        }
         mImageUploadDoneAction = uploadDoneAction;
         Intent imagePickIntent = new Intent(Intent.ACTION_GET_CONTENT);
         imagePickIntent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -436,6 +450,7 @@ public class PostEditFragment extends BaseFragment implements
         }
     }
 
+    @SuppressLint("DefaultLocale")
     private void uploadImage(@NonNull Uri uri) {
         if (mUploadDisposable != null && !mUploadDisposable.isDisposed()) {
             mUploadDisposable.dispose();
@@ -449,8 +464,14 @@ public class PostEditFragment extends BaseFragment implements
                 .getFileUploadMetadataFromUri(mActivity.getContentResolver(), uri)
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
-                .subscribe((pair) -> {
-                    getBus().post(new FileUploadEvent(pair.first, pair.second));
+                .subscribe((metadata) -> {
+                    String filename = metadata.filename;
+                    if (filename == null) {
+                        // generate a random filename
+                        String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(metadata.mimeType);
+                        filename = String.format("upload-%d.%s", System.currentTimeMillis() / 1000, ext);
+                    }
+                    getBus().post(new FileUploadEvent(metadata.inputStream, filename, metadata.mimeType));
                 }, (error) -> {
                     onFileUploadErrorEvent(new FileUploadErrorEvent(new ApiFailure(error)));
                 }, () -> {
@@ -551,7 +572,6 @@ public class PostEditFragment extends BaseFragment implements
                              @Nullable @Post.Status String newStatus) {
         mPost.setTitleFromPostEditor(mPostTitleEditView.getText().toString());
         mPost.setMarkdown(mPostEditView.getText().toString());
-        mPost.setMobiledoc(GhostApiUtils.markdownToMobiledoc(mPost.getMarkdown()));
         mPost.setHtml(null);   // omit stale HTML from request body
         mPost.setTags(mPostSettingsManager.getTags());
         mPost.setCustomExcerpt(mPostSettingsManager.getCustomExcerpt());
@@ -690,7 +710,7 @@ public class PostEditFragment extends BaseFragment implements
     }
 
     @Subscribe
-    public void onPostSyncedEvent(PostSyncedEvent _) {
+    public void onPostSyncedEvent(PostSyncedEvent ignored) {
         SaveScenario saveScenario = mSaveScenario;
         mSaveScenario = SaveScenario.UNKNOWN;
         mHandler.removeCallbacks(mSaveTimeoutRunnable);

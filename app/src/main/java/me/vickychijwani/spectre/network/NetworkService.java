@@ -3,7 +3,6 @@ package me.vickychijwani.spectre.network;
 import android.annotation.SuppressLint;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
-import android.webkit.MimeTypeMap;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -119,7 +118,7 @@ public class NetworkService implements
         getBus().register(this);
         if (AccountManager.hasActiveBlog()) {
             BlogMetadata activeBlog = AccountManager.getActiveBlog();
-            GhostApiService api = GhostApiUtils.getRetrofit(activeBlog.getBlogUrl(), httpClient)
+            GhostApiService api = GhostApiUtils.INSTANCE.getRetrofit(activeBlog.getBlogUrl(), httpClient)
                     .create(GhostApiService.class);
             setApiService(activeBlog.getBlogUrl(), api);
 
@@ -321,6 +320,8 @@ public class NetworkService implements
                     SettingsList settingsList = response.body();
                     storeEtag(response.headers(), ETag.TYPE_BLOG_SETTINGS);
                     createOrUpdateModel(settingsList.settings);
+                    // TODO this is dead code; permalink setting was removed in Ghost 2.0
+                    // see https://github.com/TryGhost/Ghost/pull/9768/files
                     savePermalinkFormat(settingsList.settings);
                     getBus().post(new BlogSettingsLoadedEvent(settingsList.settings));
                     refreshSucceeded(event);
@@ -368,29 +369,25 @@ public class NetworkService implements
             }
         }
 
-        mApi.getPosts(mAuthToken.getAuthHeader(), loadEtag(ETag.TYPE_ALL_POSTS), POSTS_FETCH_LIMIT).enqueue(new Callback<PostList>() {
+        RealmResults<User> users = mRealm.where(User.class).findAll();
+        if (users.size() == 0) {
+            return;
+        }
+
+        User user = users.first();
+        String authorFilter = null;     // Retrofit skips parameters with null values
+        if (user.isOnlyAuthorOrContributor()) {
+            authorFilter = "author:" + user.getSlug();
+        }
+
+        final Call<PostList> postListCall = mApi.getPosts(mAuthToken.getAuthHeader(),
+                loadEtag(ETag.TYPE_ALL_POSTS), authorFilter, POSTS_FETCH_LIMIT);
+        postListCall.enqueue(new Callback<PostList>() {
             @Override
             public void onResponse(@NonNull Call<PostList> call, @NonNull Response<PostList> response) {
                 if (response.isSuccessful()) {
                     PostList postList = response.body();
                     storeEtag(response.headers(), ETag.TYPE_ALL_POSTS);
-
-                    // if this user is only an author, filter out posts they're not authorized to access
-                    // FIXME use GET posts/?filter=author_id:1 instead, similar to Ghost-Admin filters
-                    RealmResults<User> users = mRealm.where(User.class).findAll();
-                    if (users.size() > 0) {
-                        User user = users.first();
-                        if (user.hasOnlyAuthorRole()) {
-                            String currentUser = user.getId();
-                            // reverse iteration because in forward iteration, indices change on deleting
-                            for (int i = postList.posts.size() - 1; i >= 0; --i) {
-                                Post post = postList.posts.get(i);
-                                if (currentUser.equals(post.getAuthor())) {
-                                    postList.posts.remove(i);
-                                }
-                            }
-                        }
-                    }
 
                     // delete local copies of posts that are no longer within the POSTS_FETCH_LIMIT
                     // FIXME if there are any locally-edited posts at this point that were pushed
@@ -407,22 +404,22 @@ public class NetworkService implements
                                     PendingAction.EDIT
                             })
                             .findAll();
-                    for (int i = postList.posts.size() - 1; i >= 0; --i) {
+                    for (int i = postList.getPosts().size() - 1; i >= 0; --i) {
                         for (int j = 0; j < localOnlyEdits.size(); ++j) {
-                            if (postList.posts.get(i).getId().equals(localOnlyEdits.get(j).getId())) {
-                                postList.posts.remove(i);
+                            if (postList.getPosts().get(i).getId().equals(localOnlyEdits.get(j).getId())) {
+                                postList.getPosts().remove(i);
                             }
                         }
                     }
 
                     // make sure drafts have a publishedAt of FAR_FUTURE so they're sorted to the top
-                    Observable.fromIterable(postList.posts)
+                    Observable.fromIterable(postList.getPosts())
                             .filter(post -> post.getPublishedAt() == null)
                             .forEach(post -> post.setPublishedAt(DateTimeUtils.FAR_FUTURE));
 
                     // now create / update received posts
                     // TODO use Realm#insertOrUpdate() for faster insertion here: https://realm.io/news/realm-java-1.1.0/
-                    createOrUpdateModel(postList.posts);
+                    createOrUpdateModel(postList.getPosts());
                     getBus().post(new PostsLoadedEvent(getPostsSorted(), POSTS_FETCH_LIMIT));
 
                     refreshSucceeded(event);
@@ -456,6 +453,7 @@ public class NetworkService implements
     public void onCreatePostEvent(final CreatePostEvent event) {
         Log.i(TAG, "[onCreatePostEvent] creating new post");
         Post newPost = new Post();
+        newPost.setMobiledoc(GhostApiUtils.INSTANCE.initializeMobiledoc());
         newPost.addPendingAction(PendingAction.CREATE);
         newPost.setId(getTempUniqueId(Post.class));
         createOrUpdateModel(newPost);                    // save the local post to db
@@ -523,6 +521,8 @@ public class NetworkService implements
                     Post post = postsToDelete.get(i);
                     if (i > 0) deleteQuery.or();
                     deleteQuery.equalTo("id", post.getId());
+                    Log.i(TAG, "[onSyncPostsEvent] deleted local copy of post %s",
+                            post.getId());
                 }
                 deleteModels(deleteQuery.findAll());
             }
@@ -567,22 +567,28 @@ public class NetworkService implements
         // the loop variable is *local* to the loop block, so it can be captured in a closure easily
         // this is unlike JavaScript, in which the same loop variable is mutated
         for (final Post localPost : localDeletedPosts) {
-            Log.i(TAG, "[onSyncPostsEvent] deleting post id = %s", localPost.getId());
+            Log.i(TAG, "[onSyncPostsEvent] deleting post %s", localPost.getId());
             mApi.deletePost(mAuthToken.getAuthHeader(), localPost.getId()).enqueue(new Callback<String>() {
                 @Override
                 public void onResponse(@NonNull Call<String> call, @NonNull Response<String> response) {
                     if (response.isSuccessful()) {
                         AnalyticsService.logDraftDeleted();
+                        Log.i(TAG, "[onSyncPostsEvent] deleted remote post %s",
+                                localPost.getId());
                         postUploadQueue.removeFirstOccurrence(localPost);
                         postsToDelete.add(localPost);
                         if (postUploadQueue.isEmpty()) syncFinishedCB.call();
                     } else {
+                        Log.e(TAG, "[onSyncPostsEvent] failed to delete remote post, " +
+                                "id %s", localPost.getId());
                         onFailure.call(localPost, new ApiFailure<>(response));
                     }
                 }
 
                 @Override
                 public void onFailure(@NonNull Call<String> call, @NonNull Throwable error) {
+                    Log.e(TAG, "[onSyncPostsEvent] failed to delete remote post, " +
+                            "id %s", localPost.getId());
                     onFailure.call(localPost, new ApiFailure<>(error));
                 }
             });
@@ -590,26 +596,34 @@ public class NetworkService implements
 
         // 2. NEW POSTS
         for (final Post localPost : localNewPosts) {
-            Log.i(TAG, "[onSyncPostsEvent] creating post");    // local new posts don't have an id
+            Log.i(TAG, "[onSyncPostsEvent] creating post with local id %s", localPost.getId());
             mApi.createPost(mAuthToken.getAuthHeader(), PostStubList.from(localPost)).enqueue(new Callback<PostList>() {
                 @Override
                 public void onResponse(@NonNull Call<PostList> call, @NonNull Response<PostList> response) {
                     if (response.isSuccessful()) {
                         PostList postList = response.body();
                         AnalyticsService.logNewDraftUploaded();
-                        Post updatedPost = copyPosts(createOrUpdateModel(postList.posts)).get(0);
+                        Post updatedPost = copyPosts(createOrUpdateModel(postList.getPosts())).get(0);
+                        Log.i(TAG, "[onSyncPostsEvent] created post %s", updatedPost.getId());
                         postUploadQueue.removeFirstOccurrence(localPost);
                         postsToDelete.add(localPost);
+                        // new posts do not have the mobiledoc field set, so retain
+                        // those values from the local copy
+                        updatedPost.setMobiledoc(localPost.getMobiledoc());
                         // FIXME this is a new post! how do subscribers know which post changed?
                         getBus().post(new PostReplacedEvent(updatedPost));
                         if (postUploadQueue.isEmpty()) syncFinishedCB.call();
                     } else {
+                        Log.e(TAG, "[onSyncPostsEvent] failed to sync new post, " +
+                                "local id %s", localPost.getId());
                         onFailure.call(localPost, new ApiFailure<>(response));
                     }
                 }
 
                 @Override
                 public void onFailure(@NonNull Call<PostList> call, @NonNull Throwable error) {
+                    Log.e(TAG, "[onSyncPostsEvent] failed to sync new post, " +
+                            "local id %s", localPost.getId());
                     onFailure.call(localPost, new ApiFailure<>(error));
                 }
             });
@@ -617,38 +631,48 @@ public class NetworkService implements
 
         // 3. EDITED POSTS
         Action1<Post> uploadEditedPost = (editedPost) -> {
-            Log.i(TAG, "[onSyncPostsEvent] updating post id = %s", editedPost.getId());
+            Log.i(TAG, "[onSyncPostsEvent] updating post %s", editedPost.getId());
             PostStubList postStubList = PostStubList.from(editedPost);
             mApi.updatePost(mAuthToken.getAuthHeader(), editedPost.getId(), postStubList).enqueue(new Callback<PostList>() {
                 @Override
                 public void onResponse(@NonNull Call<PostList> call, @NonNull Response<PostList> response) {
                     if (response.isSuccessful()) {
                         PostList postList = response.body();
-                        Post syncedPost = postList.posts.get(0);
+                        Post syncedPost = postList.getPosts().get(0);
                         Post realmPost = mRealm.where(Post.class)
                                 .equalTo("id", editedPost.getId())
                                 .findFirst();
-                        // saved posts do not have the markdown/mobiledoc fields set, so retain
+                        // saved posts do not have the mobiledoc field set, so retain
                         // those values from a pre-save copy
-                        syncedPost.setMarkdown(realmPost.getMarkdown());
                         syncedPost.setMobiledoc(realmPost.getMobiledoc());
-                        createOrUpdateModel(postList.posts);
+                        if (!realmPost.getId().equals(syncedPost.getId())) {
+                            Log.wtf("Trying to update a post with a different id! " +
+                                    "syncedPost.id = %s, realmPost.id = %s",
+                                    syncedPost.getId(), realmPost.getId());
+                        }
+                        Log.i(TAG, "[onSyncPostsEvent] updated post %s",
+                                syncedPost.getId());
+                        createOrUpdateModel(postList.getPosts());
                         postUploadQueue.removeFirstOccurrence(editedPost);
                         getBus().post(new PostSyncedEvent(syncedPost));
                         if (postUploadQueue.isEmpty()) syncFinishedCB.call();
                     } else {
+                        Log.e(TAG, "[onSyncPostsEvent] failed to update post %s",
+                                editedPost.getId());
                         onFailure.call(editedPost, new ApiFailure<>(response));
                     }
                 }
 
                 @Override
                 public void onFailure(@NonNull Call<PostList> call, @NonNull Throwable error) {
+                    Log.e(TAG, "[onSyncPostsEvent] failed to update post %s",
+                            editedPost.getId());
                     onFailure.call(editedPost, new ApiFailure<>(error));
                 }
             });
         };
         for (final Post localPost : localEditedPosts) {
-            Log.i(TAG, "[onSyncPostsEvent] downloading edited post with id = %s for comparison",
+            Log.i(TAG, "[onSyncPostsEvent] downloading edited post %s for comparison",
                     localPost.getId());
             mApi.getPost(mAuthToken.getAuthHeader(), localPost.getId()).enqueue(new Callback<PostList>() {
                 @Override
@@ -657,13 +681,13 @@ public class NetworkService implements
                         PostList postList = response.body();
                         Post serverPost = null;
                         boolean hasConflict = false;
-                        if (!postList.posts.isEmpty()) {
-                            serverPost = postList.posts.get(0);
+                        if (!postList.getPosts().isEmpty()) {
+                            serverPost = postList.getPosts().get(0);
                             hasConflict = (serverPost.getUpdatedAt() != null
                                     && !serverPost.getUpdatedAt().equals(localPost.getUpdatedAt()));
                         }
                         if (hasConflict && PostUtils.isDirty(serverPost, localPost)) {
-                            Log.w(TAG, "[onSyncPostsEvent] conflict found for post id = %s", localPost.getId());
+                            Log.w(TAG, "[onSyncPostsEvent] conflict found for post %s", localPost.getId());
                             postUploadQueue.removeFirstOccurrence(localPost);
                             if (postUploadQueue.isEmpty()) syncFinishedCB.call();
                             localPost.setConflictState(Post.CONFLICT_UNRESOLVED);
@@ -678,14 +702,16 @@ public class NetworkService implements
                             uploadEditedPost.call(localPost);
                         }
                     } else {
-                        // if we can't get the server post, optimistically upload the local copy
+                        Log.w(TAG, "[onSyncPostsEvent] couldn't get server post for " +
+                                "conflict detection - uploading local copy optimistically");
                         uploadEditedPost.call(localPost);
                     }
                 }
 
                 @Override
                 public void onFailure(@NonNull Call<PostList> call, @NonNull Throwable error) {
-                    // if we can't get the server post, optimistically upload the local copy
+                    Log.w(TAG, "[onSyncPostsEvent] couldn't get server post for " +
+                            "conflict detection - uploading local copy optimistically");
                     uploadEditedPost.call(localPost);
                 }
             });
@@ -780,8 +806,9 @@ public class NetworkService implements
     public void onFileUploadEvent(FileUploadEvent event) {
         Log.i(TAG, "[onFileUploadEvent] uploading file");
 
-        InputStream inputStream = event.inputStream;
-        String mimeType = event.mimeType;
+        final InputStream inputStream = event.inputStream;
+        final String filename = event.filename;
+        final String mimeType = event.mimeType;
 
         byte[] fileBytes = null;
         try {
@@ -807,10 +834,6 @@ public class NetworkService implements
         if (fileBytes == null) {
             return;
         }
-
-        // generate a random filename, Ghost chokes without it
-        String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType);
-        String filename = String.format("upload-%d.%s", System.currentTimeMillis() / 1000, ext);
 
         RequestBody body = RequestBody.create(MediaType.parse(mimeType), fileBytes);
         MultipartBody.Part filePart = MultipartBody.Part.createFormData("uploadimage", filename, body);
@@ -946,7 +969,7 @@ public class NetworkService implements
 
     private void savePermalinkFormat(List<Setting> settings) {
         for (Setting setting : settings) {
-            if ("permalinks".equals(setting.getKey())) {
+            if ("permalinks".equals(setting.getKey()) && setting.getValue() != null) {
                 BlogMetadata activeBlog = AccountManager.getActiveBlog();
                 activeBlog.setPermalinkFormat(setting.getValue());
                 AccountManager.addOrUpdateBlog(activeBlog);
